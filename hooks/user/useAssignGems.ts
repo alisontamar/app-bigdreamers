@@ -1,5 +1,6 @@
 import { useState, useCallback } from 'react';
 import { assignGemsToUser } from '@/services/supabase/userService';
+import { InterestType } from '@/services/supabase/investmentService';
 import { invalidateCache, CacheKeys } from '@/services/cache/cacheService';
 
 export function useAssignGems() {
@@ -9,8 +10,10 @@ export function useAssignGems() {
   const assign = useCallback(async (params: {
     userId: string;
     gems: number;
-    companyId?: string;
-    companyName?: string;
+    contractStartDate: string;
+    contractEndDate: string;
+    interestType: InterestType;
+    interestRate: number;
   }) => {
     setLoading(true);
     setError(null);

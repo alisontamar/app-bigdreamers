@@ -1,0 +1,49 @@
+{
+  "project_info": {
+    "project_number": "904381309468",
+    "firebase_url": "https://micro-ffd0a-default-rtdb.firebaseio.com",
+    "project_id": "micro-ffd0a",
+    "storage_bucket": "micro-ffd0a.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:904381309468:android:758afca36c5ae06e45b5d9",
+        "android_client_info": {
+          "package_name": "com.bigdreamers"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCB2JXoVu7925M4wm3uSUpOBqNhQiKBs1Y"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:904381309468:android:fc9ebd42b699da1a45b5d9",
+        "android_client_info": {
+          "package_name": "com.bigdreamerss.bigdreamerss"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCB2JXoVu7925M4wm3uSUpOBqNhQiKBs1Y"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

@@ -15,6 +15,8 @@ function mapLearningModule(row: any, totalLessons = 0): LearningModule {
     difficulty: row.difficulty,
     orderIndex: row.order_index,
     totalLessons,
+    isPremium: row.is_premium ?? false,
+    gemsCost: row.gems_cost ?? 0,
   };
 }
 
@@ -81,6 +83,8 @@ export async function createModule(module: {
   thumbnail: string;
   difficulty: 'beginner' | 'intermediate' | 'advanced';
   orderIndex?: number;
+  isPremium?: boolean;
+  gemsCost?: number;
 }): Promise<LearningModule> {
   const supabase = await getSupabaseClient();
 
@@ -95,6 +99,8 @@ export async function createModule(module: {
       thumbnail: module.thumbnail,
       difficulty: module.difficulty,
       order_index: module.orderIndex ?? 0,
+      is_premium: module.isPremium ?? false,
+      gems_cost: module.isPremium ? (module.gemsCost ?? 0) : 0,
     })
     .select()
     .single();
@@ -114,6 +120,8 @@ export async function updateModule(
     thumbnail: string;
     difficulty: 'beginner' | 'intermediate' | 'advanced';
     orderIndex: number;
+    isPremium: boolean;
+    gemsCost: number;
   }>
 ): Promise<void> {
   const supabase = await getSupabaseClient();
@@ -127,6 +135,8 @@ export async function updateModule(
   if (updates.thumbnail !== undefined) dbUpdates.thumbnail = updates.thumbnail;
   if (updates.difficulty !== undefined) dbUpdates.difficulty = updates.difficulty;
   if (updates.orderIndex !== undefined) dbUpdates.order_index = updates.orderIndex;
+  if (updates.isPremium !== undefined) dbUpdates.is_premium = updates.isPremium;
+  if (updates.gemsCost !== undefined) dbUpdates.gems_cost = updates.isPremium === false ? 0 : updates.gemsCost;
 
   const { error } = await supabase
     .from('learning_modules')
@@ -423,4 +433,28 @@ export async function syncModuleLessons(
       await deleteLessonById(ex.id);
     }
   }
+}
+
+// IDs de los módulos premium que el usuario ya desbloqueó (compra permanente).
+export async function getUserModuleUnlocks(userId: string): Promise<string[]> {
+  const supabase = await getSupabaseClient();
+  const { data, error } = await supabase
+    .from('user_module_unlocks')
+    .select('module_id')
+    .eq('user_id', userId);
+
+  if (error) throw error;
+  return (data || []).map((row: any) => row.module_id);
+}
+
+// Descuenta las gemas del usuario y registra el desbloqueo mediante una
+// función SQL atómica (evita condiciones de carrera en el saldo de gemas).
+export async function unlockPremiumModule(userId: string, moduleId: string): Promise<void> {
+  const supabase = await getSupabaseClient();
+  const { error } = await supabase.rpc('unlock_premium_module', {
+    p_user_id: userId,
+    p_module_id: moduleId,
+  });
+
+  if (error) throw error;
 }

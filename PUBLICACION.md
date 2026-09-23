@@ -41,23 +41,17 @@ eas credentials -p android
 6. **Monetización**: vincular cuenta de comerciante en "Monetiza con Play" antes de activar compras/suscripciones reales.
 7. **Publicar en producción**: subir versión final, esperar revisión de Google (horas a días), queda disponible al público.
 
-## Roadmap - Apple App Store (pendiente de iniciar)
+## Roadmap - Apple App Store
 
-1. **Cuenta de Apple Developer Program** (99 USD/año). Si se publica como empresa, Apple pide número D-U-N-S (puede tardar días en tramitarse).
-2. **Configurar el proyecto para iOS**:
-   - Falta agregar `bundleIdentifier` en `app.json` (sección `ios`), ej. `com.bigdreamers`.
-   - Falta agregar un perfil `ios` en `eas.json` (build de producción tipo `app-store`).
-3. **Registrar el App ID** en el portal de Apple Developer (o dejar que EAS lo haga automáticamente al buildear, si se configura con `eas credentials` / API key de App Store Connect).
-4. **Crear el registro de la app en App Store Connect**: nombre, bundle ID, SKU.
-5. **Completar metadata**: descripción, capturas de pantalla (varios tamaños de dispositivo), ícono, categoría, política de privacidad, "App Privacy" (nutrition label de datos recolectados), clasificación de edad, URL de soporte.
-6. **Build y subida**:
-   ```
-   eas build --platform ios --profile production
-   eas submit --platform ios
-   ```
-7. **TestFlight (equivalente a las pruebas de Play)**:
-   - **Interno**: hasta 100 testers (miembros del equipo en App Store Connect), acceso inmediato sin revisión.
-   - **Externo**: hasta 10,000 testers vía link público, requiere una revisión corta de Apple (24-48h aprox.) antes de que puedan entrar.
-8. **Enviar a revisión de App Store** para el release público. Revisión de Apple suele tardar 24-48 horas (puede variar).
-9. **Monetización**: configurar Acuerdos, Impuestos y Datos bancarios en App Store Connect (sección "Agreements, Tax, and Banking") antes de activar compras/suscripciones.
-10. Una vez aprobada, se publica y queda disponible en el App Store.
+1. ~~**Cuenta de Apple Developer Program** (99 USD/año).~~ **Listo** — cuenta obtenida.
+2. ~~**Configurar el proyecto para iOS**~~ **Listo** — ya está en el repo:
+   - `bundleIdentifier` presente en `app.json` (`ios.bundleIdentifier: "com.bigdreamers"`).
+   - El perfil `production` de `eas.json` ya incluye bloque `ios` (comparte `env` con Android); no hace falta un perfil separado, `eas build -p ios` lo usa tal cual.
+3. ~~**Registrar el App ID**~~ **Listo**.
+4. ~~**Crear el registro de la app en App Store Connect**~~ **Listo**.
+5. ~~**Completar metadata**~~ **Listo**.
+6. ~~**Build y subida**~~ **Listo**.
+7. ~~**Responder solicitud de info adicional de Apple**~~ **Listo** — se sacó del flujo el cobro de gemas dentro de la app (ahora solo se solicitan y un admin las asigna manualmente, sin IAP), se grabó el video de demo con un build `preview` instalado vía QR (ad-hoc, sin TestFlight) en un iPhone 11 (iOS 18.7.8), y se respondió en el Resolution Center con el video + las notas (dispositivo probado, descripción de la app, servicios externos usados: Supabase, Sign in with Apple/Google, Expo push).
+8. ~~**Enviar a revisión de App Store**~~ **APROBADA** ✅ (aprobación recibida, disponible en el App Store en hasta 24h desde la aprobación).
+9. **Pendiente si se monetiza en el futuro**: configurar Acuerdos, Impuestos y Datos bancarios en App Store Connect (sección "Agreements, Tax, and Banking") antes de activar compras/suscripciones.
+10. ~~Una vez aprobada, se publica y queda disponible en el App Store.~~ **Listo**.

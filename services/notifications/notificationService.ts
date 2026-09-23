@@ -17,6 +17,12 @@ async function loadNotifications() {
   }
 }
 
+// Permite a app/_layout.tsx escuchar cuándo el usuario toca una notificación
+// push (fuera de la app) sin duplicar la carga perezosa de expo-notifications.
+export async function getNotificationsModule() {
+  return loadNotifications();
+}
+
 export function setupNotificationHandler() {
   if (isExpoGo) return;
   loadNotifications()
@@ -70,6 +76,21 @@ export async function registerForPushNotifications(): Promise<string | null> {
   }
 }
 
+// Solo consulta el estado del permiso, sin pedirlo. Se usa para recordarle al
+// usuario que las active si aún no lo hizo, cada vez que vuelve a la app.
+// En Expo Go (push no soportado) devuelve true para no molestar con el aviso.
+export async function hasNotificationPermission(): Promise<boolean> {
+  const Notifications = await loadNotifications();
+  if (!Notifications) return true;
+
+  try {
+    const perm: any = await Notifications.getPermissionsAsync();
+    return !!perm.granted;
+  } catch {
+    return true;
+  }
+}
+
 export async function savePushToken(userId: string, pushToken: string): Promise<void> {
   const supabase = await getSupabaseClient();
   await supabase
@@ -107,6 +128,59 @@ export async function sendPushNotification(
     }
   } catch (error) {
     console.error('Error sending push notification:', error);
+  }
+}
+
+const EXPO_PUSH_BATCH_SIZE = 100;
+
+function chunk<T>(items: T[], size: number): T[][] {
+  const chunks: T[][] = [];
+  for (let i = 0; i < items.length; i += size) {
+    chunks.push(items.slice(i, i + size));
+  }
+  return chunks;
+}
+
+// Envía el mismo push a muchos tokens de una vez (avisos masivos: nuevo curso,
+// nueva empresa). Expo acepta hasta 100 mensajes por request, por eso se
+// divide en lotes.
+export async function sendBulkPushNotifications(
+  expoPushTokens: string[],
+  title: string,
+  body: string,
+  data?: Record<string, any>
+): Promise<void> {
+  const batches = chunk(expoPushTokens, EXPO_PUSH_BATCH_SIZE);
+
+  for (const batch of batches) {
+    try {
+      const response = await fetch('https://exp.host/--/api/v2/push/send', {
+        method: 'POST',
+        headers: {
+          'Accept': 'application/json',
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(
+          batch.map((to) => ({
+            to,
+            sound: 'default',
+            title,
+            body,
+            data: data || {},
+            priority: 'high',
+          }))
+        ),
+      });
+      const result = await response.json();
+      const tickets = Array.isArray(result?.data) ? result.data : [];
+      tickets.forEach((ticket: any) => {
+        if (ticket?.status === 'error') {
+          console.error('Expo push error:', ticket.message, ticket.details);
+        }
+      });
+    } catch (error) {
+      console.error('Error sending bulk push notification:', error);
+    }
   }
 }
 
@@ -152,13 +226,17 @@ export async function sendGemsAssignedNotification(
 
 export async function sendReportGeneratedNotification(
   userPushToken: string,
-  companyName: string
+  pdfUrl: string,
+  companyName?: string
 ): Promise<void> {
   const title = '📄 Nuevo reporte disponible';
-  const body = `Se generó tu reporte mensual de inversión en ${companyName}. Ya puedes descargarlo.`;
+  const body = companyName
+    ? `Se generó tu reporte mensual de inversión en ${companyName}. Ya puedes descargarlo.`
+    : 'Se generó tu reporte mensual de inversión. Ya puedes descargarlo.';
 
   await sendPushNotification(userPushToken, title, body, {
     type: 'report_generated',
     companyName,
+    pdfUrl,
   });
 }

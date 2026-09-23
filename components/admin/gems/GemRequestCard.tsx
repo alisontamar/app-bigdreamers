@@ -50,8 +50,12 @@ const GemRequestCard = React.memo(({ request, onApprove, onReject, isDark }: Gem
         <Text className="ml-2 text-base font-bold" style={{ color: Colors.gold[400] }}>
           {request.gems} gemas
         </Text>
-        <Text className="ml-2" style={{ color: textMuted }}>·</Text>
-        <Text className="ml-2" style={{ color: textMuted }}>{request.bsPrice} Bs</Text>
+        {!!request.bsPrice && (
+          <>
+            <Text className="ml-2" style={{ color: textMuted }}>·</Text>
+            <Text className="ml-2" style={{ color: textMuted }}>{request.bsPrice} Bs</Text>
+          </>
+        )}
       </View>
 
       {request.receiptImageUrl ? (

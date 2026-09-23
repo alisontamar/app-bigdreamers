@@ -9,13 +9,14 @@
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
     "ios": {
-      "supportsTablet": true,
+      "supportsTablet": false,
       "bundleIdentifier": "com.bigdreamers",
       "buildNumber": "1",
       "infoPlist": {
         "UIBackgroundModes": [
           "remote-notification"
-        ]
+        ],
+        "ITSAppUsesNonExemptEncryption": false
       }
     },
     "web": {
@@ -26,6 +27,7 @@
     "android": {
       "package": "com.bigdreamers",
       "versionCode": 1,
+      "googleServicesFile": "./google-services.json",
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/logo.png",
         "backgroundColor": "#1A3A5C"
@@ -39,6 +41,7 @@
       "expo-font",
       "expo-web-browser",
       "expo-secure-store",
+      "expo-apple-authentication",
       [
         "expo-splash-screen",
         {
@@ -53,15 +56,15 @@
         {
           "android": {
             "extraProguardRules": "-keep class com.bigdreamerss.** { *; }",
-            "enableProguardInReleaseBuilds": true
+            "enableProguardInReleaseBuilds": true,
+            "enableMinifyInReleaseBuilds": true
           }
         }
       ],
       [
         "expo-image-picker",
         {
-          "photosPermission": "La aplicación necesita acceder a tu galería para subir imágenes de perfil y comprobantes de pago.",
-          "cameraPermission": "La aplicación necesita acceder a tu cámara para tomar fotos."
+          "photosPermission": "La aplicación necesita acceder a tu galería para subir imágenes de perfil y comprobantes de pago."
         }
       ],
       [
@@ -72,7 +75,8 @@
         }
       ],
       "expo-sharing",
-      "expo-asset"
+      "expo-asset",
+      "@react-native-community/datetimepicker"
     ],
     "experiments": {
       "typedRoutes": true

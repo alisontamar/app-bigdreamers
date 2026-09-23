@@ -245,6 +245,23 @@ export async function rejectGemRequest(id: string, reason?: string): Promise<voi
   if (error) throw error;
 }
 
+// Solicitud "libre" (sin paquete ni comprobante) desde el botón "Recargar
+// gemas" en Perfil. Usa la función request_gems (SECURITY DEFINER) porque
+// un usuario normal no tiene permiso para insertar la notificación del admin
+// directamente vía RLS.
+export async function requestGemsSimple(userId: string, gems: number): Promise<string> {
+  const supabase = await getSupabaseClient();
+
+  const { data, error } = await supabase.rpc('request_gems', {
+    p_user_id: userId,
+    p_gems: gems,
+  });
+
+  if (error) throw error;
+
+  return data as string;
+}
+
 export async function getUserGemHistory(userId: string): Promise<GemRequest[]> {
   const supabase = await getSupabaseClient();
   const { data, error } = await supabase

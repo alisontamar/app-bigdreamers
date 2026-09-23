@@ -1,23 +1,24 @@
 import { useState, useCallback } from 'react';
-import { deleteObjective } from '@/services/supabase/courseService';
+import { unlockPremiumModule } from '@/services/supabase/learningService';
 
-export function useDeleteObjective() {
+export function useUnlockPremiumModule() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<Error | null>(null);
 
-  const remove = useCallback(async (objectiveId: string) => {
+  const unlock = useCallback(async (userId: string, moduleId: string) => {
     setLoading(true);
     setError(null);
 
     try {
-      await deleteObjective(objectiveId);
+      await unlockPremiumModule(userId, moduleId);
     } catch (err) {
       const error = err instanceof Error ? err : new Error(String(err));
       setError(error);
+      throw error;
     } finally {
       setLoading(false);
     }
   }, []);
 
-  return { remove, loading, error };
+  return { unlock, loading, error };
 }

@@ -30,8 +30,11 @@ import LearnHeader from '@/components/learn/LearnHeader';
 import { useLearningModules } from '@/hooks/learning/useLearningModules';
 import { invalidateCachePattern, CacheKeys } from '@/services/cache/cacheService';
 import { useUserModulesProgressDetailed } from '@/hooks/learning/useUserModulesProgressDetailed';
+import { useUserModuleUnlocks } from '@/hooks/learning/useUserModuleUnlocks';
+import { useUnlockPremiumModule } from '@/hooks/learning/useUnlockPremiumModule';
 import { useCurrentUser } from '@/hooks/user/useCurrentUser';
 import { useAuth } from '@/contexts/AuthContext';
+import PremiumUnlockModal from '@/components/shared/PremiumUnlockModal';
 
 
 type ModuleStatus = 'completed' | 'active' | 'locked';
@@ -153,6 +156,9 @@ export default function LearnScreen() {
   });
 
   const { progress, loading: progressLoading, refetch: refetchProgress } = useUserModulesProgressDetailed(user?.id ?? null);
+  const { unlockedModuleIds, loading: unlocksLoading, refetch: refetchUnlocks } = useUserModuleUnlocks(user?.id ?? null);
+  const { unlock } = useUnlockPremiumModule();
+  const [unlockTarget, setUnlockTarget] = useState<{ id: string; title: string; gemsCost: number } | null>(null);
 
   // Gemas desde la BD (fresco) igual que Home/Perfil, para que no quede desfasado
   // con el authUser (que solo se actualiza al login).
@@ -165,10 +171,12 @@ export default function LearnScreen() {
       if (user?.id) {
         invalidateCachePattern(CacheKeys.userModulesProgressDetailed(user.id));
         invalidateCachePattern(CacheKeys.currentUser(user.id));
+        invalidateCachePattern(CacheKeys.userModuleUnlocks(user.id));
       }
       refetch();
       refetchProgress();
       refetchUser();
+      refetchUnlocks();
       setRefreshKey(k => k + 1);
     }, [user?.id])
   );
@@ -180,8 +188,9 @@ export default function LearnScreen() {
       if (user?.id) {
         invalidateCachePattern(CacheKeys.userModulesProgressDetailed(user.id));
         invalidateCachePattern(CacheKeys.currentUser(user.id));
+        invalidateCachePattern(CacheKeys.userModuleUnlocks(user.id));
       }
-      await Promise.all([refetch(), refetchProgress(), refetchUser()]);
+      await Promise.all([refetch(), refetchProgress(), refetchUser(), refetchUnlocks()]);
       setRefreshKey(k => k + 1);
     } finally {
       setRefreshing(false);
@@ -192,37 +201,58 @@ export default function LearnScreen() {
   const textMuted = isDark ? 'rgba(255,255,255,0.55)' : Colors.light.textMuted;
   const accentColor = isDark ? Colors.gold[400] : Colors.light.accent;
 
-  const loading = modulesLoading || progressLoading;
+  const loading = modulesLoading || progressLoading || unlocksLoading;
 
   const enrichedModules = useMemo(() => {
     const progressMap = new Map(progress.map((p) => [p.moduleId, p]));
+    const unlockedSet = new Set(unlockedModuleIds);
     let foundActive = false;
 
     return modules.map((mod) => {
       const userProgress  = progressMap.get(mod.id);
       const totalLessons  = mod.totalLessons ?? 0;
+      const needsUnlock   = mod.isPremium && !unlockedSet.has(mod.id);
 
       // `completed` ya considera si se agregaron lecciones nuevas tras completar:
       // en ese caso viene false y el módulo se reactiva en la lección faltante.
       if (userProgress?.completed) {
-        return { ...mod, status: 'completed' as const, completedLessons: totalLessons, totalLessons };
+        return { ...mod, status: 'completed' as const, completedLessons: totalLessons, totalLessons, needsUnlock: false };
       }
 
       if (!foundActive) {
         foundActive = true;
         const completedLessons = userProgress?.completedLessons ?? 0;
-        return { ...mod, status: 'active' as const, completedLessons, totalLessons };
+        return { ...mod, status: 'active' as const, completedLessons, totalLessons, needsUnlock };
       }
 
-      return { ...mod, status: 'locked' as const, completedLessons: 0, totalLessons };
+      return { ...mod, status: 'locked' as const, completedLessons: 0, totalLessons, needsUnlock: false };
     });
-  }, [modules, progress, refreshKey]);
+  }, [modules, progress, unlockedModuleIds, refreshKey]);
 
   const activeModule = enrichedModules.find((m) => m.status === 'active');
 
-  const handleModulePress = (moduleId: string, status: ModuleStatus) => {
+  const openUnlock = (moduleId: string, title: string, gemsCost: number) => {
+    setUnlockTarget({ id: moduleId, title, gemsCost });
+  };
+
+  const handleModulePress = (moduleId: string, status: ModuleStatus, needsUnlock: boolean, title: string, gemsCost: number) => {
     if (status === 'locked' || status === 'completed') return;
+    if (needsUnlock) {
+      openUnlock(moduleId, title, gemsCost);
+      return;
+    }
     router.push(`/module/${moduleId}` as any);
+  };
+
+  const handleConfirmUnlock = async () => {
+    if (!unlockTarget || !user?.id) return;
+    await unlock(user.id, unlockTarget.id);
+    invalidateCachePattern(CacheKeys.userModuleUnlocks(user.id));
+    invalidateCachePattern(CacheKeys.currentUser(user.id));
+    await Promise.all([refetchUnlocks(), refetchUser()]);
+    const targetId = unlockTarget.id;
+    setUnlockTarget(null);
+    router.push(`/module/${targetId}` as any);
   };
 
   return (
@@ -312,6 +342,7 @@ export default function LearnScreen() {
                 const isCompleted = module.status === 'completed';
                 const isActive    = module.status === 'active';
                 const isLocked    = module.status === 'locked';
+                const needsUnlock = isActive && module.needsUnlock;
                 const isRight     = index % 2 === 0;
                 const isLast      = index === enrichedModules.length - 1;
 
@@ -334,21 +365,27 @@ export default function LearnScreen() {
                 const textMtd   = isDark ? 'rgba(255,255,255,0.5)' : Colors.light.textMuted;
 
                 const statusLabel = isCompleted ? 'Completado'
+                  : needsUnlock ? `${module.gemsCost.toLocaleString('es-BO')} gemas para desbloquear`
                   : isActive ? `Lección ${module.completedLessons + 1}/${module.totalLessons}`
                   : `${module.totalLessons} lecciones`;
 
                 const displayStatus = isCompleted ? 'COMPLETADO'
+                  : needsUnlock ? 'PREMIUM'
                   : isActive ? 'EN CURSO'
                   : 'BLOQUEADO';
 
                 const statusBg = isCompleted
                   ? (isDark ? 'rgba(22,163,74,0.16)' : '#DCFCE7')
+                  : needsUnlock
+                  ? 'rgba(255,215,64,0.18)'
                   : isActive
                   ? (isDark ? 'rgba(59,130,246,0.16)' : '#DBEAFE')
                   : (isDark ? 'rgba(255,255,255,0.06)' : '#F1F5F9');
 
                 const statusColor = isCompleted
                   ? (isDark ? '#4ADE80' : '#16A34A')
+                  : needsUnlock
+                  ? Colors.gold[500]
                   : isActive
                   ? (isDark ? '#60A5FA' : Colors.light.accent)
                   : textMtd;
@@ -374,6 +411,8 @@ export default function LearnScreen() {
                   >
                     {isLocked ? (
                       <Lock size={20} color={isDark ? 'rgba(255,255,255,0.45)' : '#94A3B8'} />
+                    ) : needsUnlock ? (
+                      <Lock size={28} color={isDark ? '#000' : '#1e3a5f'} />
                     ) : (
                       <IconComponent size={isActive ? 28 : 24} color={isDark ? '#000' : '#1e3a5f'} />
                     )}
@@ -459,7 +498,7 @@ export default function LearnScreen() {
                   <AnimatedCard key={module.id} index={index}>
                     <View style={{ marginBottom: isLast ? 0 : 0 }}>
                       <TouchableOpacity
-                        onPress={isLocked || isCompleted ? undefined : () => handleModulePress(module.id, module.status)}
+                        onPress={isLocked || isCompleted ? undefined : () => handleModulePress(module.id, module.status, module.needsUnlock, module.title, module.gemsCost)}
                         activeOpacity={isLocked || isCompleted ? 1 : 0.7}
                         style={{
                           flexDirection: 'row',
@@ -505,22 +544,48 @@ export default function LearnScreen() {
             style={{ backgroundColor: bg }}
           >
             <PulsingCtaButton>
-              <Pressable
-                accessible
-                accessibilityLabel={`Continuar lección ${activeModule.completedLessons + 1}`}
-                onPress={() => router.push(`/module/${activeModule.id}` as any)}
-                className="active:opacity-80 flex-row items-center justify-center rounded-2xl py-4 gap-2.5"
-                style={{ backgroundColor: accentColor }}
-              >
-                <Play size={16} color={isDark ? '#000' : '#fff'} fill={isDark ? '#000' : '#fff'} />
-                <Text className="text-[15px] font-bold" style={{ color: isDark ? '#000' : '#fff' }}>
-                  Continuar lección {activeModule.completedLessons + 1}
-                </Text>
-              </Pressable>
+              {activeModule.needsUnlock ? (
+                <Pressable
+                  accessible
+                  accessibilityLabel={`Desbloquear ${activeModule.title} por ${activeModule.gemsCost} gemas`}
+                  onPress={() => openUnlock(activeModule.id, activeModule.title, activeModule.gemsCost)}
+                  className="active:opacity-80 flex-row items-center justify-center rounded-2xl py-4 gap-2.5"
+                  style={{ backgroundColor: Colors.gold[400] }}
+                >
+                  <Lock size={16} color="#000" />
+                  <Text className="text-[15px] font-bold" style={{ color: '#000' }}>
+                    Desbloquear por {activeModule.gemsCost.toLocaleString('es-BO')} gemas
+                  </Text>
+                </Pressable>
+              ) : (
+                <Pressable
+                  accessible
+                  accessibilityLabel={`Continuar lección ${activeModule.completedLessons + 1}`}
+                  onPress={() => router.push(`/module/${activeModule.id}` as any)}
+                  className="active:opacity-80 flex-row items-center justify-center rounded-2xl py-4 gap-2.5"
+                  style={{ backgroundColor: accentColor }}
+                >
+                  <Play size={16} color={isDark ? '#000' : '#fff'} fill={isDark ? '#000' : '#fff'} />
+                  <Text className="text-[15px] font-bold" style={{ color: isDark ? '#000' : '#fff' }}>
+                    Continuar lección {activeModule.completedLessons + 1}
+                  </Text>
+                </Pressable>
+              )}
             </PulsingCtaButton>
           </View>
         )}
       </View>
+
+      {unlockTarget && (
+        <PremiumUnlockModal
+          visible={!!unlockTarget}
+          moduleTitle={unlockTarget.title}
+          gemsCost={unlockTarget.gemsCost}
+          userGems={gems}
+          onConfirm={handleConfirmUnlock}
+          onClose={() => setUnlockTarget(null)}
+        />
+      )}
     </SafeAreaView>
   );
 }

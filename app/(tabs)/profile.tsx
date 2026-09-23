@@ -1,10 +1,11 @@
 import React, { useCallback, useRef, useState, useEffect, useMemo } from 'react';
 import {
   View, Text, ScrollView, Image, Modal,
-  Pressable, ActivityIndicator, RefreshControl, Linking,
+  Pressable, ActivityIndicator, RefreshControl, Linking, Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { LogOut, Shield, Sun, Moon, ChevronRight, User, BarChart2, Users, Gem, TrendingUp, Mail, MapPinOff, FileText, Download } from 'lucide-react-native';
+import { LogOut, Shield, Sun, Moon, ChevronRight, User, BarChart2, Users, Gem, TrendingUp, Mail, MapPinOff, FileText, Download, Trash2 } from 'lucide-react-native';
+import { deleteAccount } from '@/services/supabase/accountService';
 
 const SUPPORT_EMAIL = 'dreamersb648@gmail.com';
 const INVEST_PREVIEW = 4;
@@ -19,6 +20,7 @@ import { useTheme } from '@/context/ThemeContext';
 import ProfileHeader from '@/components/profile/ProfileHeader';
 import ProfileStatCard from '@/components/profile/ProfileStatCard';
 import ProfileScreenHeader from '@/components/profile/ProfileScreenHeader';
+import RequestGemsModal from '@/components/gems/RequestGemsModal';
 
 interface MenuItemProps {
   icon: React.ReactNode;
@@ -102,6 +104,8 @@ export default function ProfileScreen() {
   const [refreshing,  setRefreshing]  = useState(false);
   const [showAllInvestments, setShowAllInvestments] = useState(false);
   const [removedCompanyVisible, setRemovedCompanyVisible] = useState(false);
+  const [deletingAccount, setDeletingAccount] = useState(false);
+  const [showRequestGemsModal, setShowRequestGemsModal] = useState(false);
 
   const handleInvestmentPress = useCallback((companyId: string | null) => {
     if (companyId) {
@@ -113,18 +117,26 @@ export default function ProfileScreen() {
   }, [router]);
 
   // Agrupamos las inversiones por empresa (suma de gemas + cantidad de veces).
+  // Los contratos de inversión (gemas asignadas por el admin, con tipo de
+  // interés) se muestran en "MIS REPORTES", no aquí: esta sección es solo la
+  // inversión gamificada de gemas en empresas.
+  const companyInvestments = useMemo(
+    () => investments.filter((inv) => !inv.interestType && !!inv.companyId),
+    [investments]
+  );
+
   const investmentsByCompany = useMemo(() => {
     const map = new Map<string, { companyId: string | null; companyName: string; gems: number; count: number }>();
-    for (const inv of investments) {
-      const key = inv.companyId ?? inv.companyName;
-      const cur = map.get(key) ?? { companyId: inv.companyId, companyName: inv.companyName, gems: 0, count: 0 };
+    for (const inv of companyInvestments) {
+      const key = (inv.companyId ?? inv.companyName) as string;
+      const cur = map.get(key) ?? { companyId: inv.companyId, companyName: inv.companyName ?? '', gems: 0, count: 0 };
       cur.gems += inv.gems;
       cur.count += 1;
       map.set(key, cur);
     }
     return Array.from(map.values()).sort((a, b) => b.gems - a.gems);
-  }, [investments]);
-  const totalInvested = useMemo(() => investments.reduce((s, i) => s + i.gems, 0), [investments]);
+  }, [companyInvestments]);
+  const totalInvested = useMemo(() => companyInvestments.reduce((s, i) => s + i.gems, 0), [companyInvestments]);
 
   useEffect(() => {
     if (user) setInitialLoad(false);
@@ -175,6 +187,43 @@ export default function ProfileScreen() {
   const handleLogout = () => {
     logout();
     router.replace('/login');
+  };
+
+  const doDeleteAccount = async () => {
+    setDeletingAccount(true);
+    try {
+      await deleteAccount();
+      logout();
+      router.replace('/login');
+    } catch (error: any) {
+      Alert.alert('No se pudo eliminar la cuenta', error?.message || 'Intenta nuevamente.');
+    } finally {
+      setDeletingAccount(false);
+    }
+  };
+
+  const handleDeleteAccount = () => {
+    Alert.alert(
+      'Eliminar cuenta',
+      'Esto borrará tu cuenta y todos tus datos (inversiones, gemas, reportes, progreso) de forma permanente. Esta acción no se puede deshacer.',
+      [
+        { text: 'Cancelar', style: 'cancel' },
+        {
+          text: 'Continuar',
+          style: 'destructive',
+          onPress: () => {
+            Alert.alert(
+              '¿Estás totalmente seguro?',
+              'Última confirmación: tu cuenta se eliminará ahora mismo y no podrás recuperarla.',
+              [
+                { text: 'Cancelar', style: 'cancel' },
+                { text: 'Eliminar mi cuenta', style: 'destructive', onPress: doDeleteAccount },
+              ],
+            );
+          },
+        },
+      ],
+    );
   };
 
   return (
@@ -314,7 +363,7 @@ export default function ProfileScreen() {
                   onPress={() => Linking.openURL(report.pdfUrl)}
                   className="flex-row items-center gap-3 px-4 py-[13px] active:opacity-70"
                   accessibilityRole="button"
-                  accessibilityLabel={`Descargar reporte de ${report.companyName}`}
+                  accessibilityLabel={`Descargar reporte de ${report.companyName ?? 'inversión'}`}
                 >
                   <View
                     className="w-9 h-9 rounded-xl items-center justify-center"
@@ -324,7 +373,7 @@ export default function ProfileScreen() {
                   </View>
                   <View className="flex-1">
                     <Text className="font-sans text-[15px]" numberOfLines={1} style={{ color: isDark ? '#FFFFFF' : Colors.light.textPrimary }}>
-                      {report.companyName}
+                      {report.companyName ?? 'Reporte de inversión'}
                     </Text>
                     <Text className="text-[11px]" style={{ color: isDark ? 'rgba(255,255,255,0.55)' : Colors.light.textMuted }}>
                       {report.reportDate}
@@ -359,6 +408,13 @@ export default function ProfileScreen() {
             icon={<User size={16} color={iconColor} />}
             label="Información personal"
             onPress={() => router.push('/personal-info' as any)}
+          />
+          <View className="h-px mx-4" style={{ backgroundColor: divider }} />
+          <MenuItem
+            isDark={isDark}
+            icon={<Gem size={16} color={iconColor} />}
+            label="Recargar gemas"
+            onPress={() => setShowRequestGemsModal(true)}
           />
         </View>
 
@@ -471,6 +527,31 @@ export default function ProfileScreen() {
             </Text>
           </Pressable>
         </View>
+
+        {/* ELIMINAR CUENTA */}
+        <View className="mx-4 mt-1 mb-2">
+          <Pressable
+            className="flex-row items-center gap-3 px-4 py-[15px] rounded-2xl active:opacity-70"
+            onPress={handleDeleteAccount}
+            disabled={deletingAccount}
+            style={{ opacity: deletingAccount ? 0.6 : 1 }}
+            accessible
+            accessibilityLabel="Eliminar cuenta"
+            accessibilityRole="button"
+          >
+            <View className="w-9 h-9 rounded-xl items-center justify-center">
+              {deletingAccount
+                ? <ActivityIndicator size="small" color={isDark ? 'rgba(255,255,255,0.4)' : Colors.light.textMuted} />
+                : <Trash2 size={16} color={isDark ? 'rgba(255,255,255,0.4)' : Colors.light.textMuted} />}
+            </View>
+            <Text
+              className="font-semibold text-[15px] flex-1"
+              style={{ color: isDark ? 'rgba(255,255,255,0.4)' : Colors.light.textMuted }}
+            >
+              {deletingAccount ? 'Eliminando cuenta…' : 'Eliminar cuenta'}
+            </Text>
+          </Pressable>
+        </View>
       </ScrollView>
 
       {/* Modal: empresa eliminada */}
@@ -532,6 +613,15 @@ export default function ProfileScreen() {
           </Pressable>
         </Pressable>
       </Modal>
+
+      {/* Modal: recargar gemas */}
+      <RequestGemsModal
+        visible={showRequestGemsModal}
+        userId={user.id}
+        userName={user.name}
+        isDark={isDark}
+        onClose={() => setShowRequestGemsModal(false)}
+      />
     </SafeAreaView>
   );
 }

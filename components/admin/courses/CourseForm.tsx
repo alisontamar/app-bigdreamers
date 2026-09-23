@@ -21,6 +21,8 @@ export interface LearningModuleFormData {
   difficulty:  Difficulty;
   orderIndex?: number;
   lessons?:    { title: string; durationMinutes: number; content: string }[];
+  isPremium:   boolean;
+  gemsCost:    number;
 }
 
 interface QuizQuestion {
@@ -80,6 +82,8 @@ const CourseForm = ({ onPublish, onUpdate, onCancel, initialData, initialLessons
   const [thumbnail,   setThumbnail]   = useState(initialData?.thumbnail ?? '');
   const [difficulty,  setDifficulty]  = useState<Difficulty>(initialData?.difficulty ?? 'beginner');
   const [orderIndex,  setOrderIndex]  = useState(initialData?.orderIndex?.toString() ?? '');
+  const [isPremium,   setIsPremium]   = useState(initialData?.isPremium ?? false);
+  const [gemsCost,    setGemsCost]    = useState(initialData?.gemsCost ? initialData.gemsCost.toString() : '');
 
   // Lesson list
   const [lessons, setLessons] = useState<{ title: string; durationMinutes: number; content: string }[]>(initialLessons ?? []);
@@ -166,6 +170,8 @@ const CourseForm = ({ onPublish, onUpdate, onCancel, initialData, initialLessons
       difficulty,
       orderIndex:  orderIndex ? parseInt(orderIndex) : undefined,
       lessons:     finalLessons.length > 0 ? finalLessons : undefined,
+      isPremium,
+      gemsCost:    isPremium ? (parseInt(gemsCost) || 0) : 0,
     };
 
     if (isEditing && initialData?.id && onUpdate) {
@@ -186,6 +192,11 @@ const CourseForm = ({ onPublish, onUpdate, onCancel, initialData, initialLessons
         'Sin lecciones',
         'El módulo debe tener al menos una lección antes de publicarlo. Agrega una lección usando el formulario de abajo.',
       );
+      return;
+    }
+
+    if (isPremium && (!gemsCost.trim() || (parseInt(gemsCost) || 0) <= 0)) {
+      Alert.alert('Costo requerido', 'Ingresa cuántas gemas cuesta desbloquear este curso premium.');
       return;
     }
 
@@ -314,6 +325,39 @@ const CourseForm = ({ onPublish, onUpdate, onCancel, initialData, initialLessons
             );
           })}
         </View>
+      </View>
+
+      {/* ── Acceso (gratis / premium) ────────────────────── */}
+      <View className="rounded-2xl p-5 mb-4" style={{ backgroundColor: cardBg, borderWidth: 1, borderColor }}>
+        <SectionLabel label="Acceso" isDark={isDark} />
+        <View className="flex-row gap-2">
+          <Pressable onPress={() => setIsPremium(false)}
+            className="flex-1 py-2.5 rounded-xl border items-center"
+            style={{
+              backgroundColor: !isPremium ? `${Colors.success}20` : isDark ? 'rgba(255,255,255,0.04)' : Colors.light.surface,
+              borderColor:     !isPremium ? Colors.success        : borderColor,
+            }}>
+            <Text className="text-xs font-bold" style={{ color: !isPremium ? Colors.success : textMuted }}>
+              Gratis
+            </Text>
+          </Pressable>
+          <Pressable onPress={() => setIsPremium(true)}
+            className="flex-1 py-2.5 rounded-xl border items-center"
+            style={{
+              backgroundColor: isPremium ? 'rgba(255,215,64,0.15)' : isDark ? 'rgba(255,255,255,0.04)' : Colors.light.surface,
+              borderColor:     isPremium ? Colors.gold[400]        : borderColor,
+            }}>
+            <Text className="text-xs font-bold" style={{ color: isPremium ? Colors.gold[500] : textMuted }}>
+              Premium (pagando con gemas)
+            </Text>
+          </Pressable>
+        </View>
+
+        {isPremium && (
+          <TextInput placeholder="Costo en gemas para desbloquear" placeholderTextColor={textMuted}
+            value={gemsCost} onChangeText={setGemsCost} keyboardType="numeric"
+            className="rounded-xl border px-4 py-3.5 text-[15px] mt-3" style={inputStyle} />
+        )}
       </View>
 
       {/* ── Lecciones ───────────────────────────────────── */}

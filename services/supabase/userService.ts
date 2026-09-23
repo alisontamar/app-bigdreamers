@@ -1,6 +1,6 @@
 import { User } from '@/types';
 import { getSupabaseClient} from '@/services/supabase/supabase';
-import { createInvestment } from '@/services/supabase/investmentService';
+import { createInvestment, InterestType } from '@/services/supabase/investmentService';
 import { createNotification } from '@/services/supabase/notificationDbService';
 import { sendGemsAssignedNotification } from '@/services/notifications/notificationService';
 
@@ -46,6 +46,16 @@ export async function getAllUsers(): Promise<User[]> {
 
   if (error) throw error;
   return (data || []).map(mapUserRow);
+}
+
+export async function getAllUserIdsAndTokens(): Promise<{ id: string; pushToken: string | null }[]> {
+  const supabase = await getSupabaseClient();
+  const { data, error } = await supabase
+    .from('users')
+    .select('id, push_token');
+
+  if (error) throw error;
+  return (data || []).map((row: any) => ({ id: row.id, pushToken: row.push_token }));
 }
 
 export async function getUserById(userId: string): Promise<User | null> {
@@ -145,28 +155,26 @@ export async function addGemsToUser(userId: string, gemsToAdd: number): Promise<
 export async function assignGemsToUser(input: {
   userId: string;
   gems: number;
-  companyId?: string;
-  companyName?: string;
+  contractStartDate: string;
+  contractEndDate: string;
+  interestType: InterestType;
+  interestRate: number;
 }): Promise<void> {
   await addGemsToUser(input.userId, input.gems);
 
-  if (input.companyId && input.companyName) {
-    try {
-      await createInvestment({
-        userId: input.userId,
-        companyId: input.companyId,
-        companyName: input.companyName,
-        gems: input.gems,
-      });
-    } catch (e) {
-      console.error('[assignGemsToUser] No se pudo registrar la inversión:', e);
-    }
-  }
+  // A diferencia de otros efectos secundarios (notificación, push), si esto falla
+  // el admin debe saber: sin esta fila no existe contrato para generar reportes.
+  await createInvestment({
+    userId: input.userId,
+    gems: input.gems,
+    contractStartDate: input.contractStartDate,
+    contractEndDate: input.contractEndDate,
+    interestType: input.interestType,
+    interestRate: input.interestRate,
+  });
 
   const title = '💎 ¡Gemas asignadas!';
-  const body = input.companyName
-    ? `El administrador te asignó ${input.gems} gemas para tu inversión en ${input.companyName}.`
-    : `El administrador te asignó ${input.gems} gemas. Ya están disponibles en tu cuenta.`;
+  const body = `El administrador te asignó ${input.gems} gemas. Ya están disponibles en tu cuenta.`;
 
   try {
     await createNotification({
@@ -174,7 +182,7 @@ export async function assignGemsToUser(input: {
       type: 'gems_assigned',
       title,
       body,
-      data: { gems: input.gems, companyName: input.companyName ?? null },
+      data: { gems: input.gems },
     });
   } catch (e) {
     console.error('[assignGemsToUser] No se pudo crear la notificación:', e);
@@ -183,7 +191,7 @@ export async function assignGemsToUser(input: {
   try {
     const user = await getUserById(input.userId);
     if (user?.pushToken) {
-      await sendGemsAssignedNotification(user.pushToken, input.gems, input.companyName);
+      await sendGemsAssignedNotification(user.pushToken, input.gems);
     }
   } catch (e) {
     console.error('[assignGemsToUser] No se pudo enviar el push:', e);

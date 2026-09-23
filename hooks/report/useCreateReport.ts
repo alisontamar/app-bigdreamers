@@ -13,6 +13,7 @@ export function useCreateReport() {
   const create = useCallback(async (params: ReportPdfData & {
     userId: string;
     companyId?: string;
+    investmentId?: string;
     createdBy: string;
   }) => {
     setLoading(true);
@@ -27,23 +28,32 @@ export function useCreateReport() {
         companyName: params.companyName,
         investorName: params.investorName,
         reportDate: params.reportDate,
+        investmentId: params.investmentId,
         investmentAmount: params.investmentAmount,
         interestRate: params.interestRate,
+        interestType: params.interestType,
+        contractStartDate: params.contractStartDate,
+        contractEndDate: params.contractEndDate,
         updatedCapital: params.updatedCapital,
         updatedProfit: params.updatedProfit,
         nextMonthCapital: params.nextMonthCapital,
         observations: params.observations,
+        receiptImageUrl: params.receiptImageUrl,
         pdfUrl,
         createdBy: params.createdBy,
       });
+
+      const reportBody = params.companyName
+        ? `Se generó tu reporte mensual de inversión en ${params.companyName}. Ya puedes descargarlo.`
+        : 'Se generó tu reporte mensual de inversión. Ya puedes descargarlo.';
 
       try {
         await createNotification({
           userId: params.userId,
           type: 'report_generated',
           title: '📄 Nuevo reporte disponible',
-          body: `Se generó tu reporte mensual de inversión en ${params.companyName}. Ya puedes descargarlo.`,
-          data: { pdfUrl, companyName: params.companyName },
+          body: reportBody,
+          data: { pdfUrl, companyName: params.companyName ?? null },
         });
       } catch (e) {
         console.error('[useCreateReport] No se pudo crear la notificación:', e);
@@ -52,7 +62,7 @@ export function useCreateReport() {
       try {
         const user = await getUserById(params.userId);
         if (user?.pushToken) {
-          await sendReportGeneratedNotification(user.pushToken, params.companyName);
+          await sendReportGeneratedNotification(user.pushToken, pdfUrl, params.companyName);
         }
       } catch (e) {
         console.error('[useCreateReport] No se pudo enviar el push:', e);

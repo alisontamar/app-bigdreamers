@@ -1,18 +1,20 @@
 import { View, Text, Pressable, ScrollView } from 'react-native';
-import { Users, BookOpen, Building2, FileText } from 'lucide-react-native';
+import { Users, BookOpen, Building2, FileText, Gem } from 'lucide-react-native';
 import { Colors } from '@/constants/colors';
 
 interface AdminTabsProps {
-  activeTab: 'users' | 'courses' | 'companies' | 'reports';
-  onTabChange: (tab: 'users' | 'courses' | 'companies' | 'reports') => void;
+  activeTab: 'users' | 'courses' | 'companies' | 'reports' | 'requests';
+  onTabChange: (tab: 'users' | 'courses' | 'companies' | 'reports' | 'requests') => void;
   isDark: boolean;
+  pendingRequestsCount?: number;
 }
 
-const AdminTabs = ({ activeTab, onTabChange, isDark }: AdminTabsProps) => {
+const AdminTabs = ({ activeTab, onTabChange, isDark, pendingRequestsCount = 0 }: AdminTabsProps) => {
   const textMuted = isDark ? 'rgba(255,255,255,0.65)' : Colors.light.textMuted;
 
   const tabs = [
     { key: 'users', label: 'Usuarios', icon: Users },
+    { key: 'requests', label: 'Solicitudes', icon: Gem },
     { key: 'courses', label: 'Cursos', icon: BookOpen },
     { key: 'companies', label: 'Empresas', icon: Building2 },
     { key: 'reports', label: 'Reportes', icon: FileText },
@@ -48,6 +50,16 @@ const AdminTabs = ({ activeTab, onTabChange, isDark }: AdminTabsProps) => {
               <Text className="ml-2 font-semibold" style={{ color: isActive ? '#000' : textMuted }}>
                 {tab.label}
               </Text>
+              {tab.key === 'requests' && pendingRequestsCount > 0 && (
+                <View
+                  className="ml-1.5 rounded-full px-1.5 py-0.5 items-center justify-center"
+                  style={{ backgroundColor: isActive ? '#000' : '#FF6B6B', minWidth: 18 }}
+                >
+                  <Text className="text-[10px] font-extrabold text-center" style={{ color: '#fff' }}>
+                    {pendingRequestsCount}
+                  </Text>
+                </View>
+              )}
             </Pressable>
           );
         })}

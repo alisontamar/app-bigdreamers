@@ -52,6 +52,8 @@ export interface LearningModule {
   difficulty: 'beginner' | 'intermediate' | 'advanced';
   orderIndex?: number;
   totalLessons?: number;
+  isPremium: boolean;
+  gemsCost: number;
 }
 
 export interface Activity {

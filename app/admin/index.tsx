@@ -1,12 +1,16 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect, useRef } from 'react';
 import { View, Text, ScrollView, Pressable, TextInput, Alert, RefreshControl, Linking } from 'react-native';
 import { Plus, BookOpen, Building, Trash2, Pencil, Search, FileText, Download } from 'lucide-react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useTheme } from '@/context/ThemeContext';
 import { Colors } from '@/constants/colors';
 import { useAuth } from '@/contexts/AuthContext';
 import { useAllUsers } from '@/hooks/user/useAllUsers';
 import { useAssignGems } from '@/hooks/user/useAssignGems';
+import { useGemRequests } from '@/hooks/gem/useGemRequests';
+import { useApproveGemRequest } from '@/hooks/gem/useApproveGemRequest';
+import { useRejectGemRequest } from '@/hooks/gem/useRejectGemRequest';
 import { useAllReports } from '@/hooks/report/useAllReports';
 import { useCreateReport } from '@/hooks/report/useCreateReport';
 import { useLearningModules } from '@/hooks/learning/useLearningModules';
@@ -21,13 +25,22 @@ import { useDeleteCompany } from '@/hooks/company/useDeleteCompany';
 import { LearningModuleFormData } from '@/components/admin/courses/CourseForm';
 import { Company } from '@/constants/mockCompanies';
 import { User } from '@/types';
-import { uploadCompanyImage } from '@/services/supabase/storageService';
+import { uploadCompanyImage, uploadReportReceiptImage } from '@/services/supabase/storageService';
+import { InterestType } from '@/services/supabase/investmentService';
 import { addLessonToLearningModule, deleteLessonsByModuleId, syncModuleLessons } from '@/services/supabase/learningService';
 import { invalidateCache, CacheKeys } from '@/services/cache/cacheService';
+import { notifyAllUsersCoursePublished, notifyAllUsersCompanyPublished } from '@/services/notifications/broadcastNotifications';
+import { getUserById } from '@/services/supabase/userService';
+import { createNotification } from '@/services/supabase/notificationDbService';
+import { sendGemRequestNotification } from '@/services/notifications/notificationService';
+import { GemRequest } from '@/constants/mockGemRequests';
 import AdminHeader from '@/components/admin/AdminHeader';
 import AdminTabs from '@/components/admin/AdminTabs';
 import UserListCard from '@/components/admin/users/UserListCard';
 import AssignGemsModal from '@/components/admin/users/AssignGemsModal';
+import GemRequestCard from '@/components/admin/gems/GemRequestCard';
+import ConfirmApproveModal from '@/components/admin/gems/ConfirmApproveModal';
+import ConfirmRejectModal from '@/components/admin/gems/ConfirmRejectModal';
 import ReportForm, { ReportFormValues } from '@/components/admin/reports/ReportForm';
 import CourseForm from '@/components/admin/courses/CourseForm';
 import CompanyForm from '@/components/admin/companies/CompanyForm';
@@ -35,10 +48,17 @@ import CompanyForm from '@/components/admin/companies/CompanyForm';
 const AdminScreen = () => {
   const { isDark } = useTheme();
   const { user } = useAuth();
-  const [activeTab, setActiveTab] = useState<'users' | 'courses' | 'companies' | 'reports'>('users');
+  const routeParams = useLocalSearchParams<{ assignGemsUserId?: string; tab?: string }>();
+  const router = useRouter();
+  const [activeTab, setActiveTab] = useState<'users' | 'courses' | 'companies' | 'reports' | 'requests'>('users');
 
   const { users, loading: usersLoading, refetch: refetchUsers } = useAllUsers();
   const { assign: assignGems, loading: assigning } = useAssignGems();
+
+  const { requests: gemRequests, loading: gemRequestsLoading, refetch: refetchGemRequests } = useGemRequests();
+  const { approve: approveGemRequest, loading: approvingGemRequest } = useApproveGemRequest();
+  const { reject: rejectGemRequest, loading: rejectingGemRequest } = useRejectGemRequest();
+  const pendingGemRequests = gemRequests.filter((r) => r.status === 'pending');
 
   const { reports, loading: reportsLoading, refetch: refetchReports } = useAllReports();
   const { create: createReport, loading: creatingReport } = useCreateReport();
@@ -57,6 +77,8 @@ const AdminScreen = () => {
   const [userSearch, setUserSearch] = useState('');
   const [assigningToUser, setAssigningToUser] = useState<User | null>(null);
   const [showAssignModal, setShowAssignModal] = useState(false);
+  const [approvingRequest, setApprovingRequest] = useState<GemRequest | null>(null);
+  const [rejectingRequest, setRejectingRequest] = useState<GemRequest | null>(null);
   const [showReportForm, setShowReportForm] = useState(false);
   const [showCourseForm, setShowCourseForm] = useState(false);
   const [showCompanyForm, setShowCompanyForm] = useState(false);
@@ -67,9 +89,9 @@ const AdminScreen = () => {
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
-    try { await Promise.all([refetchUsers(), refetchModules(), refetchCompanies(), refetchReports()]); }
+    try { await Promise.all([refetchUsers(), refetchModules(), refetchCompanies(), refetchReports(), refetchGemRequests()]); }
     finally { setRefreshing(false); }
-  }, [refetchUsers, refetchModules, refetchCompanies, refetchReports]);
+  }, [refetchUsers, refetchModules, refetchCompanies, refetchReports, refetchGemRequests]);
 
   const bg          = isDark ? Colors.blue.primary : Colors.light.bg;
   const cardBg      = isDark ? 'rgba(255,255,255,0.05)' : Colors.light.card;
@@ -88,7 +110,39 @@ const AdminScreen = () => {
     setShowAssignModal(true);
   };
 
-  const confirmAssignGems = async (params: { gems: number; companyId?: string; companyName?: string }) => {
+  // Al venir desde "Contratos por vencer" (notificaciones), abre directo el
+  // modal de asignar gemas para ese usuario.
+  const handledAssignGemsParam = useRef<string | null>(null);
+  useEffect(() => {
+    const targetId = routeParams.assignGemsUserId;
+    if (!targetId || targetId === handledAssignGemsParam.current) return;
+    const target = users.find((u) => u.id === targetId);
+    if (!target) return;
+
+    handledAssignGemsParam.current = targetId;
+    setActiveTab('users');
+    handleAssignGems(target);
+    router.setParams({ assignGemsUserId: undefined });
+  }, [routeParams.assignGemsUserId, users, router]);
+
+  // Al venir desde una notificación de "nueva solicitud de gemas", abre
+  // directo la pestaña de Solicitudes.
+  const handledTabParam = useRef<string | null>(null);
+  useEffect(() => {
+    const targetTab = routeParams.tab;
+    if (!targetTab || targetTab === handledTabParam.current) return;
+    handledTabParam.current = targetTab;
+    if (targetTab === 'requests') setActiveTab('requests');
+    router.setParams({ tab: undefined });
+  }, [routeParams.tab, router]);
+
+  const confirmAssignGems = async (params: {
+    gems: number;
+    contractStartDate: string;
+    contractEndDate: string;
+    interestType: InterestType;
+    interestRate: number;
+  }) => {
     if (!assigningToUser) return;
     try {
       await assignGems({ userId: assigningToUser.id, ...params });
@@ -102,10 +156,101 @@ const AdminScreen = () => {
     }
   };
 
+  const handleApproveGemRequest = (id: string) => {
+    const req = gemRequests.find((r) => r.id === id) ?? null;
+    setApprovingRequest(req);
+  };
+
+  const handleRejectGemRequest = (id: string) => {
+    const req = gemRequests.find((r) => r.id === id) ?? null;
+    setRejectingRequest(req);
+  };
+
+  const confirmApproveGemRequest = async () => {
+    if (!approvingRequest || !user?.id) return;
+    const req = approvingRequest;
+    try {
+      await approveGemRequest(req.id, user.id);
+      setApprovingRequest(null);
+      refetchGemRequests();
+      refetchUsers();
+
+      try {
+        await createNotification({
+          userId: req.userId,
+          type: 'gems_assigned',
+          title: '💎 ¡Gemas asignadas!',
+          body: `Tu solicitud de ${req.gems} gemas fue aprobada. Ya están disponibles en tu cuenta.`,
+          data: { gems: req.gems, requestId: req.id },
+        });
+      } catch (e) {
+        console.error('[GemRequest] No se pudo crear la notificación de aprobación:', e);
+      }
+      try {
+        const requester = await getUserById(req.userId);
+        if (requester?.pushToken) {
+          await sendGemRequestNotification(requester.pushToken, 'approved', req.gems);
+        }
+      } catch (e) {
+        console.error('[GemRequest] No se pudo enviar el push de aprobación:', e);
+      }
+    } catch (error) {
+      console.error('Error approving gem request:', error);
+      Alert.alert('Error', 'No se pudo aprobar la solicitud. Intenta nuevamente.');
+    }
+  };
+
+  const confirmRejectGemRequest = async (reason?: string) => {
+    if (!rejectingRequest) return;
+    const req = rejectingRequest;
+    try {
+      await rejectGemRequest(req.id, reason);
+      setRejectingRequest(null);
+      refetchGemRequests();
+
+      try {
+        await createNotification({
+          userId: req.userId,
+          type: 'gem_request_rejected',
+          title: '❌ Solicitud rechazada',
+          body: reason
+            ? `Tu solicitud de ${req.gems} gemas fue rechazada. Motivo: ${reason}`
+            : `Tu solicitud de ${req.gems} gemas fue rechazada.`,
+          data: { gems: req.gems, requestId: req.id, reason: reason ?? null },
+        });
+      } catch (e) {
+        console.error('[GemRequest] No se pudo crear la notificación de rechazo:', e);
+      }
+      try {
+        const requester = await getUserById(req.userId);
+        if (requester?.pushToken) {
+          await sendGemRequestNotification(requester.pushToken, 'rejected', req.gems, reason);
+        }
+      } catch (e) {
+        console.error('[GemRequest] No se pudo enviar el push de rechazo:', e);
+      }
+    } catch (error) {
+      console.error('Error rejecting gem request:', error);
+      Alert.alert('Error', 'No se pudo rechazar la solicitud. Intenta nuevamente.');
+    }
+  };
+
   const handleCreateReport = async (values: ReportFormValues) => {
     if (!user?.id) return;
     try {
-      await createReport({ ...values, createdBy: user.id });
+      let receiptImageUrl: string | undefined;
+      if (values.receiptImageUri) {
+        try {
+          receiptImageUrl = await uploadReportReceiptImage(values.receiptImageUri);
+        } catch (storageError: any) {
+          const msg = storageError?.message || String(storageError);
+          Alert.alert('Error de imagen', `No se pudo subir el comprobante:\n\n${msg}`);
+          return;
+        }
+      }
+
+      const { receiptImageUri, ...rest } = values;
+      await createReport({ ...rest, receiptImageUrl, createdBy: user.id });
       setShowReportForm(false);
       refetchReports();
       Alert.alert('¡Reporte generado!', 'El PDF se creó y el usuario fue notificado.');
@@ -132,6 +277,14 @@ const AdminScreen = () => {
       await invalidateCache(CacheKeys.learningModules);
       refetchModules();
       Alert.alert('¡Publicado!', 'El módulo se creó correctamente.');
+
+      if (createdModule) {
+        try {
+          await notifyAllUsersCoursePublished(createdModule.id, createdModule.title);
+        } catch (e) {
+          console.error('No se pudo notificar el nuevo curso a los usuarios:', e);
+        }
+      }
     } catch (error) {
       console.error('Error creating learning module:', error);
       Alert.alert('Error', 'No se pudo crear el módulo. Verifica los datos e intenta nuevamente.');
@@ -149,6 +302,8 @@ const AdminScreen = () => {
         thumbnail: data.thumbnail,
         difficulty: data.difficulty,
         orderIndex: data.orderIndex,
+        isPremium: data.isPremium,
+        gemsCost: data.gemsCost,
       });
       if (data.lessons) {
         // Preserva las lecciones sin cambios (y su created_at); solo inserta las
@@ -194,6 +349,8 @@ const AdminScreen = () => {
           thumbnail: mod.thumbnail || '',
           difficulty: mod.difficulty || 'beginner',
           orderIndex: mod.orderIndex,
+          isPremium: mod.isPremium ?? false,
+          gemsCost: mod.gemsCost ?? 0,
         },
         lessons: lessonData,
       });
@@ -257,7 +414,7 @@ const AdminScreen = () => {
           return;
         }
       }
-      await createCompany({
+      const createdCompany = await createCompany({
         name: company.name || '',
         description: company.description || '',
         gems: company.gems || 0,
@@ -274,6 +431,14 @@ const AdminScreen = () => {
       setEditingCompany(null);
       refetchCompanies();
       Alert.alert('¡Publicado!', 'La empresa se creó correctamente.');
+
+      if (createdCompany) {
+        try {
+          await notifyAllUsersCompanyPublished(createdCompany.id, createdCompany.name);
+        } catch (e) {
+          console.error('No se pudo notificar la nueva empresa a los usuarios:', e);
+        }
+      }
     } catch (error: any) {
       const msg = error?.message || String(error);
       Alert.alert('Error', `No se pudo crear la empresa:\n\n${msg}`);
@@ -341,7 +506,6 @@ const AdminScreen = () => {
   if (showReportForm) {
     return (
       <ReportForm
-        companies={companies}
         users={users}
         onSubmit={handleCreateReport}
         onCancel={() => setShowReportForm(false)}
@@ -353,7 +517,12 @@ const AdminScreen = () => {
   return (
     <SafeAreaView className="flex-1" style={{ backgroundColor: bg }} edges={['bottom']}>
       <AdminHeader />
-      <AdminTabs activeTab={activeTab} onTabChange={setActiveTab} isDark={isDark} />
+      <AdminTabs
+        activeTab={activeTab}
+        onTabChange={setActiveTab}
+        isDark={isDark}
+        pendingRequestsCount={pendingGemRequests.length}
+      />
 
       <ScrollView
         contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 40, paddingTop: 4 }}
@@ -409,6 +578,42 @@ const AdminScreen = () => {
                     key={u.id}
                     user={u}
                     onAssignGems={handleAssignGems}
+                    isDark={isDark}
+                  />
+                ))}
+              </View>
+            )}
+          </View>
+        )}
+
+        {/* ─── Solicitudes de gemas ─── */}
+        {activeTab === 'requests' && (
+          <View>
+            <Text className="text-[17px] font-bold mb-3 mt-2" style={{ color: textPrimary }}>
+              Solicitudes de gemas ({gemRequests.length})
+            </Text>
+
+            {gemRequestsLoading ? (
+              <View className="items-center justify-center py-12">
+                <Text style={{ color: textMuted }}>Cargando solicitudes...</Text>
+              </View>
+            ) : gemRequests.length === 0 ? (
+              <View
+                className="items-center justify-center py-12 rounded-2xl"
+                style={{ backgroundColor: cardBg, borderWidth: 1, borderColor }}
+              >
+                <Text className="text-[15px] font-semibold text-center" style={{ color: textMuted }}>
+                  No hay solicitudes de gemas
+                </Text>
+              </View>
+            ) : (
+              <View>
+                {gemRequests.map((req) => (
+                  <GemRequestCard
+                    key={req.id}
+                    request={req}
+                    onApprove={handleApproveGemRequest}
+                    onReject={handleRejectGemRequest}
                     isDark={isDark}
                   />
                 ))}
@@ -643,7 +848,7 @@ const AdminScreen = () => {
                       </Pressable>
                     </View>
                     <Text className="text-xs" style={{ color: textMuted }}>
-                      {report.companyName} · {report.reportDate}
+                      {report.companyName ? `${report.companyName} · ` : ''}{report.reportDate}
                     </Text>
                   </View>
                 ))}
@@ -656,9 +861,25 @@ const AdminScreen = () => {
       <AssignGemsModal
         visible={showAssignModal}
         user={assigningToUser}
-        companies={companies}
         onConfirm={confirmAssignGems}
         onCancel={() => { setShowAssignModal(false); setAssigningToUser(null); }}
+        isDark={isDark}
+        submitting={assigning}
+      />
+
+      <ConfirmApproveModal
+        visible={!!approvingRequest}
+        request={approvingRequest}
+        onConfirm={confirmApproveGemRequest}
+        onCancel={() => setApprovingRequest(null)}
+        isDark={isDark}
+      />
+
+      <ConfirmRejectModal
+        visible={!!rejectingRequest}
+        request={rejectingRequest}
+        onConfirm={confirmRejectGemRequest}
+        onCancel={() => setRejectingRequest(null)}
         isDark={isDark}
       />
     </SafeAreaView>

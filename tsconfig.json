@@ -17,6 +17,7 @@
     "**/__tests__/**",
     "**/__mocks__/**",
     "jest.*.js",
-    "jest.config.js"
+    "jest.config.js",
+    "supabase/functions/**"
   ]
 }

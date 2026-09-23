@@ -1,28 +1,36 @@
-import React, { useMemo, useState } from 'react';
-import { View, Text, TextInput, Pressable, ScrollView, KeyboardAvoidingView, Platform } from 'react-native';
+import React, { useEffect, useMemo, useState } from 'react';
+import { View, Text, TextInput, Pressable, ScrollView, KeyboardAvoidingView, Platform, Alert } from 'react-native';
+import * as ImagePicker from 'expo-image-picker';
 import { Check, Search } from 'lucide-react-native';
 import { Colors } from '@/constants/colors';
 import { useTheme } from '@/context/ThemeContext';
-import { Company } from '@/constants/mockCompanies';
 import { User } from '@/types';
+import { InterestType } from '@/services/supabase/investmentService';
+import { getLatestReportForInvestment } from '@/services/supabase/reportService';
+import { useUserInvestments } from '@/hooks/investment/useUserInvestments';
 import ButtonBackScreen from '@/components/shared/ButtonBackScreen';
+import ImagePickerField from '@/components/shared/ImagePickerField';
 
 interface ReportFormValues {
   userId: string;
   companyId?: string;
-  companyName: string;
+  companyName?: string;
   investorName: string;
   reportDate: string;
+  investmentId: string;
   investmentAmount: number;
   interestRate: number;
+  interestType: InterestType;
+  contractStartDate: string;
+  contractEndDate: string;
   updatedCapital: number;
   updatedProfit: number;
   nextMonthCapital?: number;
   observations?: string;
+  receiptImageUri?: string;
 }
 
 interface ReportFormProps {
-  companies: Company[];
   users: User[];
   onSubmit: (values: ReportFormValues) => void;
   onCancel: () => void;
@@ -33,20 +41,86 @@ function todayIso(): string {
   return new Date().toISOString().slice(0, 10);
 }
 
-const ReportForm = ({ companies, users, onSubmit, onCancel, submitting }: ReportFormProps) => {
+function fmtDate(dateStr: string | null): string {
+  if (!dateStr) return '—';
+  const [y, m, d] = dateStr.split('-');
+  if (!y || !m || !d) return dateStr;
+  return `${d}/${m}/${y}`;
+}
+
+function round2(n: number): string {
+  return (Math.round(n * 100) / 100).toString();
+}
+
+const ReportForm = ({ users, onSubmit, onCancel, submitting }: ReportFormProps) => {
   const { isDark } = useTheme();
 
-  const [companyId, setCompanyId] = useState<string | null>(null);
   const [userQuery, setUserQuery] = useState('');
   const [selectedUser, setSelectedUser] = useState<User | null>(null);
+  const [selectedInvestmentId, setSelectedInvestmentId] = useState<string | null>(null);
   const [investorName, setInvestorName] = useState('');
   const [reportDate, setReportDate] = useState(todayIso());
-  const [investmentAmount, setInvestmentAmount] = useState('');
-  const [interestRate, setInterestRate] = useState('');
   const [updatedCapital, setUpdatedCapital] = useState('');
   const [updatedProfit, setUpdatedProfit] = useState('');
   const [nextMonthCapital, setNextMonthCapital] = useState('');
   const [observations, setObservations] = useState('');
+  const [receiptImageUri, setReceiptImageUri] = useState<string | null>(null);
+  const [calculatingSuggestion, setCalculatingSuggestion] = useState(false);
+
+  const { investments, loading: investmentsLoading } = useUserInvestments(selectedUser?.id ?? null);
+
+  const contracts = useMemo(
+    () => investments.filter((inv) => !!inv.interestType),
+    [investments]
+  );
+
+  useEffect(() => {
+    setSelectedInvestmentId(null);
+  }, [selectedUser?.id]);
+
+  const selectedInvestment = contracts.find((c) => c.id === selectedInvestmentId) ?? null;
+
+  // Sugiere capital/ganancia/capital del siguiente mes según el contrato: usa
+  // el cierre del último reporte de este mismo contrato como punto de partida
+  // (o el monto de inversión si es el primer reporte), y aplica la tasa según
+  // sea interés simple (siempre sobre el monto original) o compuesto (sobre
+  // el capital acumulado). Los campos quedan editables por si el admin
+  // necesita ajustarlos.
+  useEffect(() => {
+    if (!selectedInvestment) return;
+    let cancelled = false;
+    setCalculatingSuggestion(true);
+
+    (async () => {
+      try {
+        const rate = selectedInvestment.interestRate ?? 0;
+        const investmentAmount = selectedInvestment.gems;
+        const latestReport = await getLatestReportForInvestment(selectedInvestment.id);
+
+        const baseCapital = latestReport
+          ? latestReport.nextMonthCapital ?? latestReport.updatedCapital + latestReport.updatedProfit
+          : investmentAmount;
+
+        const gain = selectedInvestment.interestType === 'simple'
+          ? investmentAmount * (rate / 100)
+          : baseCapital * (rate / 100);
+
+        const nextCapital = baseCapital + gain;
+
+        if (!cancelled) {
+          setUpdatedCapital(round2(baseCapital));
+          setUpdatedProfit(round2(gain));
+          setNextMonthCapital(round2(nextCapital));
+        }
+      } catch (e) {
+        console.error('[ReportForm] No se pudo calcular la sugerencia de capital/ganancia:', e);
+      } finally {
+        if (!cancelled) setCalculatingSuggestion(false);
+      }
+    })();
+
+    return () => { cancelled = true; };
+  }, [selectedInvestmentId]);
 
   const textPrimary = isDark ? Colors.text.primary : Colors.light.textPrimary;
   const textMuted   = isDark ? 'rgba(255,255,255,0.65)' : Colors.light.textMuted;
@@ -71,44 +145,66 @@ const ReportForm = ({ companies, users, onSubmit, onCancel, submitting }: Report
     if (!investorName.trim()) setInvestorName(u.name);
   };
 
-  const selectedCompany = companies.find((c) => c.id === companyId) ?? null;
-
   const toNumber = (v: string) => {
     const n = parseFloat(v.replace(',', '.'));
     return isNaN(n) ? undefined : n;
   };
 
-  const investmentAmountNum = toNumber(investmentAmount);
-  const interestRateNum = toNumber(interestRate);
   const updatedCapitalNum = toNumber(updatedCapital);
   const updatedProfitNum = toNumber(updatedProfit);
   const nextMonthCapitalNum = nextMonthCapital.trim() ? toNumber(nextMonthCapital) : undefined;
 
   const canSubmit =
     !!selectedUser &&
-    !!selectedCompany &&
+    !!selectedInvestment &&
     investorName.trim().length > 0 &&
     /^\d{4}-\d{2}-\d{2}$/.test(reportDate) &&
-    investmentAmountNum !== undefined &&
-    interestRateNum !== undefined &&
     updatedCapitalNum !== undefined &&
     updatedProfitNum !== undefined;
 
+  const missingFields: string[] = [];
+  if (!selectedUser) missingFields.push('elegir el inversionista');
+  if (selectedUser && !selectedInvestment) missingFields.push('seleccionar un contrato de inversión (toca una tarjeta de la lista)');
+  if (!investorName.trim()) missingFields.push('nombre del inversionista');
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(reportDate)) missingFields.push('fecha válida (AAAA-MM-DD)');
+  if (updatedCapitalNum === undefined) missingFields.push('capital actualizado');
+  if (updatedProfitNum === undefined) missingFields.push('ganancia actualizada');
+
+  const handlePickReceipt = async () => {
+    const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!permission.granted) {
+      Alert.alert('Permiso requerido', 'Necesitamos acceso a tu galería para subir el comprobante.');
+      return;
+    }
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ['images'],
+      quality: 0.8,
+    });
+    if (!result.canceled) {
+      setReceiptImageUri(result.assets[0].uri);
+    }
+  };
+
   const handleSubmit = () => {
-    if (!canSubmit || !selectedUser || !selectedCompany) return;
+    if (!canSubmit || !selectedUser || !selectedInvestment) return;
 
     onSubmit({
       userId: selectedUser.id,
-      companyId: selectedCompany.id,
-      companyName: selectedCompany.name,
+      companyId: selectedInvestment.companyId ?? undefined,
+      companyName: selectedInvestment.companyName ?? undefined,
       investorName: investorName.trim(),
       reportDate,
-      investmentAmount: investmentAmountNum!,
-      interestRate: interestRateNum!,
+      investmentId: selectedInvestment.id,
+      investmentAmount: selectedInvestment.gems,
+      interestRate: selectedInvestment.interestRate ?? 0,
+      interestType: selectedInvestment.interestType as InterestType,
+      contractStartDate: selectedInvestment.contractStartDate ?? '',
+      contractEndDate: selectedInvestment.contractEndDate ?? '',
       updatedCapital: updatedCapitalNum!,
       updatedProfit: updatedProfitNum!,
       nextMonthCapital: nextMonthCapitalNum,
       observations: observations.trim() || undefined,
+      receiptImageUri: receiptImageUri ?? undefined,
     });
   };
 
@@ -135,28 +231,6 @@ const ReportForm = ({ companies, users, onSubmit, onCancel, submitting }: Report
           </Text>
         </View>
         <View className="w-8 h-[3px] rounded-sm mb-5 -mt-3" style={{ backgroundColor: Colors.gold[400] }} />
-
-        <Text style={{ fontSize: 12, fontWeight: '700', color: textMuted, marginBottom: 8 }}>EMPRESA</Text>
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ flexGrow: 0, marginBottom: 18 }}>
-          <View className="flex-row gap-2">
-            {companies.map((c) => {
-              const isSelected = companyId === c.id;
-              return (
-                <Pressable
-                  key={c.id}
-                  onPress={() => setCompanyId(c.id)}
-                  className="flex-row items-center px-3 py-2 rounded-full"
-                  style={{ backgroundColor: isSelected ? Colors.gold[400] : (isDark ? 'rgba(255,255,255,0.08)' : '#F1F5F9') }}
-                >
-                  {isSelected && <Check size={12} color="#000" style={{ marginRight: 4 }} />}
-                  <Text className="text-xs font-bold" style={{ color: isSelected ? '#000' : textMuted }} numberOfLines={1}>
-                    {c.name}
-                  </Text>
-                </Pressable>
-              );
-            })}
-          </View>
-        </ScrollView>
 
         <Text style={{ fontSize: 12, fontWeight: '700', color: textMuted, marginBottom: 8 }}>INVERSIONISTA (BUSCAR USUARIO)</Text>
         <View className="flex-row items-center rounded-xl border px-3 mb-2" style={inputStyle}>
@@ -196,6 +270,47 @@ const ReportForm = ({ companies, users, onSubmit, onCancel, submitting }: Report
           </View>
         )}
 
+        {selectedUser && (
+          <>
+            <Text style={{ fontSize: 12, fontWeight: '700', color: textMuted, marginBottom: 8 }}>CONTRATO DE INVERSIÓN</Text>
+            {investmentsLoading ? (
+              <Text style={{ color: textMuted, fontSize: 13, marginBottom: 16 }}>Cargando contratos...</Text>
+            ) : contracts.length === 0 ? (
+              <Text style={{ color: textMuted, fontSize: 13, marginBottom: 16 }}>
+                Este usuario no tiene contratos de inversión. Asígnale gemas primero desde la pestaña Usuarios.
+              </Text>
+            ) : (
+              <View className="mb-4" style={{ gap: 8 }}>
+                {contracts.map((c) => {
+                  const isSelected = selectedInvestmentId === c.id;
+                  return (
+                    <Pressable
+                      key={c.id}
+                      onPress={() => setSelectedInvestmentId(c.id)}
+                      className="rounded-xl border px-4 py-3"
+                      style={{
+                        borderColor: isSelected ? Colors.gold[400] : inputStyle.borderColor,
+                        backgroundColor: isSelected ? 'rgba(212,175,55,0.12)' : inputStyle.backgroundColor,
+                      }}
+                    >
+                      <View className="flex-row items-center justify-between">
+                        <Text style={{ color: textPrimary, fontWeight: '700' }}>{c.companyName ?? 'Contrato de inversión'}</Text>
+                        {isSelected && <Check size={16} color={Colors.gold[400]} />}
+                      </View>
+                      <Text style={{ color: textMuted, fontSize: 12, marginTop: 2 }}>
+                        {c.gems.toLocaleString('es-BO')} Bs · Interés {c.interestType} {c.interestRate}%
+                      </Text>
+                      <Text style={{ color: textMuted, fontSize: 12 }}>
+                        Vigencia: {fmtDate(c.contractStartDate)} – {fmtDate(c.contractEndDate)}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+            )}
+          </>
+        )}
+
         <Text style={{ fontSize: 12, fontWeight: '700', color: textMuted, marginBottom: 8 }}>NOMBRE DEL INVERSIONISTA (para el PDF)</Text>
         <TextInput
           placeholder="Nombre completo"
@@ -216,32 +331,11 @@ const ReportForm = ({ companies, users, onSubmit, onCancel, submitting }: Report
           style={inputStyle}
         />
 
-        <View className="flex-row gap-3 mb-4">
-          <View className="flex-1">
-            <Text style={{ fontSize: 12, fontWeight: '700', color: textMuted, marginBottom: 8 }}>MONTO DE INVERSIÓN (Bs)</Text>
-            <TextInput
-              placeholder="14000"
-              placeholderTextColor={textMuted}
-              value={investmentAmount}
-              onChangeText={setInvestmentAmount}
-              keyboardType="decimal-pad"
-              className="rounded-xl border px-4 py-3.5 text-[15px]"
-              style={inputStyle}
-            />
-          </View>
-          <View className="flex-1">
-            <Text style={{ fontSize: 12, fontWeight: '700', color: textMuted, marginBottom: 8 }}>INTERÉS COMPUESTO (%)</Text>
-            <TextInput
-              placeholder="2.5"
-              placeholderTextColor={textMuted}
-              value={interestRate}
-              onChangeText={setInterestRate}
-              keyboardType="decimal-pad"
-              className="rounded-xl border px-4 py-3.5 text-[15px]"
-              style={inputStyle}
-            />
-          </View>
-        </View>
+        {selectedInvestment && (
+          <Text style={{ fontSize: 12, color: textMuted, marginBottom: 8, fontStyle: 'italic' }}>
+            {calculatingSuggestion ? 'Calculando según el contrato...' : 'Calculado según el contrato — puedes ajustarlo si hace falta.'}
+          </Text>
+        )}
 
         <View className="flex-row gap-3 mb-4">
           <View className="flex-1">
@@ -292,6 +386,31 @@ const ReportForm = ({ companies, users, onSubmit, onCancel, submitting }: Report
           className="rounded-xl border px-4 py-3.5 text-[15px] mb-6"
           style={[inputStyle, { textAlignVertical: 'top', minHeight: 100 }]}
         />
+
+        <Text style={{ fontSize: 12, fontWeight: '700', color: textMuted, marginBottom: 8 }}>COMPROBANTE (opcional)</Text>
+        <View className="mb-6">
+          <ImagePickerField
+            isDark={isDark}
+            imageUri={receiptImageUri}
+            onPick={handlePickReceipt}
+            onRemove={() => setReceiptImageUri(null)}
+            variant="receipt"
+          />
+        </View>
+
+        {!canSubmit && missingFields.length > 0 && (
+          <View
+            className="rounded-xl px-4 py-3 mb-4"
+            style={{ backgroundColor: isDark ? 'rgba(239,68,68,0.12)' : '#FEF2F2', borderWidth: 1, borderColor: 'rgba(239,68,68,0.35)' }}
+          >
+            <Text style={{ color: '#EF4444', fontSize: 12, fontWeight: '700', marginBottom: 4 }}>
+              Falta completar:
+            </Text>
+            {missingFields.map((f) => (
+              <Text key={f} style={{ color: '#EF4444', fontSize: 12 }}>• {f}</Text>
+            ))}
+          </View>
+        )}
 
         <View className="flex-row gap-3">
           <Pressable

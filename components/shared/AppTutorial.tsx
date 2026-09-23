@@ -34,7 +34,7 @@ const STEPS = [
   {
     emoji: '💎',
     title: '¿Te quedaste sin gemas?',
-    desc: 'Ve a tu Perfil y toca "Recargar gemas" para comprar más y seguir invirtiendo sin límites.',
+    desc: 'Ve a tu Perfil y toca "Recargar gemas" para solicitar más y seguir invirtiendo sin límites.',
     tab: 'Perfil',
   },
 ];

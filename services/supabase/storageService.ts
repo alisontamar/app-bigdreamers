@@ -83,6 +83,34 @@ export async function uploadAvatarImage(localUri: string): Promise<string> {
   return urlData.publicUrl;
 }
 
+export async function uploadReportReceiptImage(localUri: string): Promise<string> {
+  const supabase = await getSupabaseClient();
+
+  const base64 = await FileSystem.readAsStringAsync(localUri, {
+    encoding: 'base64',
+  });
+  const bytes = toByteArray(base64);
+
+  const ext      = localUri.split('.').pop()?.toLowerCase().split('?')[0] || 'jpg';
+  const fileName = `report-receipts/${Date.now()}_${Math.random().toString(36).slice(2, 10)}.${ext}`;
+  const filePath = fileName;
+
+  const { error: uploadError } = await supabase.storage
+    .from('receipts')
+    .upload(filePath, bytes, {
+      contentType: getMimeType(localUri),
+      upsert: false,
+    });
+
+  if (uploadError) throw uploadError;
+
+  const { data: urlData } = supabase.storage
+    .from('receipts')
+    .getPublicUrl(filePath);
+
+  return urlData.publicUrl;
+}
+
 export async function uploadReceiptImage(localUri: string): Promise<string> {
   const supabase = await getSupabaseClient();
 

@@ -1,6 +1,15 @@
 import { getSupabaseClient } from './supabase';
 
-export type NotificationType = 'gems_assigned' | 'report_generated';
+export type NotificationType =
+  | 'gems_assigned'
+  | 'report_generated'
+  | 'contract_expiring_soon'
+  | 'contract_expired'
+  | 'admin_contracts_alert'
+  | 'course_published'
+  | 'company_published'
+  | 'gem_request_pending'
+  | 'gem_request_rejected';
 
 export interface AppNotification {
   id: string;
@@ -42,6 +51,30 @@ export async function createNotification(input: {
     data: input.data ?? {},
   });
 
+  if (error) throw error;
+}
+
+export async function createNotificationForUsers(
+  userIds: string[],
+  input: {
+    type: NotificationType;
+    title: string;
+    body: string;
+    data?: Record<string, any>;
+  }
+): Promise<void> {
+  if (userIds.length === 0) return;
+
+  const supabase = await getSupabaseClient();
+  const rows = userIds.map((userId) => ({
+    user_id: userId,
+    type: input.type,
+    title: input.title,
+    body: input.body,
+    data: input.data ?? {},
+  }));
+
+  const { error } = await supabase.from('notifications').insert(rows);
   if (error) throw error;
 }
 

@@ -1,7 +1,8 @@
 import React, { useCallback } from 'react';
 import { View, Text, ScrollView, Pressable, Linking, RefreshControl } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { Bell, Gem, FileText, CheckCheck } from 'lucide-react-native';
+import { useRouter } from 'expo-router';
+import { Bell, Gem, FileText, CheckCheck, Clock, BookOpen, Building } from 'lucide-react-native';
 import { useTheme } from '@/context/ThemeContext';
 import { Colors } from '@/constants/colors';
 import { useAuth } from '@/contexts/AuthContext';
@@ -25,6 +26,7 @@ function relativeTime(iso: string): string {
 const NotificationsScreen = () => {
   const { isDark } = useTheme();
   const { user } = useAuth();
+  const router = useRouter();
   const { notifications, loading, refetch } = useUserNotifications(user?.id);
   const [refreshing, setRefreshing] = React.useState(false);
 
@@ -49,6 +51,14 @@ const NotificationsScreen = () => {
     }
     if (n.data?.pdfUrl) {
       Linking.openURL(n.data.pdfUrl);
+    } else if (n.type === 'course_published' && n.data?.moduleId) {
+      router.push(`/module/${n.data.moduleId}` as any);
+    } else if (n.type === 'company_published' && n.data?.companyId) {
+      router.push(`/company/${n.data.companyId}` as any);
+    } else if (n.type === 'admin_contracts_alert') {
+      router.push('/admin/expiring-contracts' as any);
+    } else if (n.type === 'gem_request_pending') {
+      router.push('/admin?tab=requests' as any);
     }
   };
 
@@ -101,7 +111,12 @@ const NotificationsScreen = () => {
         ) : (
           <View className="gap-3">
             {notifications.map((n) => {
-              const Icon = n.type === 'gems_assigned' ? Gem : n.type === 'report_generated' ? FileText : Bell;
+              const Icon = (n.type === 'gems_assigned' || n.type === 'gem_request_pending' || n.type === 'gem_request_rejected') ? Gem
+                : n.type === 'report_generated' ? FileText
+                : n.type === 'course_published' ? BookOpen
+                : n.type === 'company_published' ? Building
+                : (n.type === 'contract_expiring_soon' || n.type === 'contract_expired' || n.type === 'admin_contracts_alert') ? Clock
+                : Bell;
               return (
                 <Pressable
                   key={n.id}

@@ -16,6 +16,8 @@ export function useCreateLearningModule() {
     thumbnail: string;
     difficulty: 'beginner' | 'intermediate' | 'advanced';
     orderIndex?: number;
+    isPremium?: boolean;
+    gemsCost?: number;
   }) => {
     setLoading(true);
     setError(null);
